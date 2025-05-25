@@ -1,0 +1,38 @@
+fmod CLUSTER is
+
+    pr SHARDMAP .
+    sort Cluster  .
+
+    var n n' : Nat .
+    var shm : ShardMap .
+    var ns : NameSpace .
+    var col : Collection .
+    var cl : Cluster .
+    var rs : ReplicaSet .
+    var c : Collection .
+    var cq : CompleteQuery .
+    
+    op newCL : -> Cluster .
+    eq newCL = CL(0, empty) .
+    op CL : Nat ShardMap -> Cluster [ctor] . ***Nat = idCounter
+
+    op addShard : Cluster -> Cluster .
+    eq addShard(CL(n, shm)) = CL(s(n), insert (n, newRS, shm)) .
+
+    ***Check whether a collection exists within a shard .
+    op collectionExistsInShard : Cluster NameSpace Nat -> Bool .
+    ceq collectionExistsInShard(CL(n', shm), ns, n) = true
+    if rs := shm[n] /\ col := getCollection(rs, ns) .
+    eq collectionExistsInShard(cl, ns, n) = false [owise] .
+
+
+    op getVersionCollection : Cluster NameSpace Nat -> Nat .
+    ceq getVersionCollection(CL(n, shm), ns, n') = getVersionCol(c)
+    if rs := shm[n'] /\ c := getCollection(rs, ns) .
+    eq getVersionCollection(cl, ns, n') = notFound [owise] .
+
+    op find : Cluster Nat CompleteQuery -> Set{JSON} .
+    ceq find(CL(n, shm), n', cq) = find(rs, cq)
+        if rs := shm[n'] .
+    eq find(cl, n , cq) = empty [owise] .
+endfm

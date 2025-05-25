@@ -1,0 +1,17 @@
+fmod OPERATOR is
+
+    sort Operator .
+
+    ops $eq $gt $gte $in $lt $lte $ne $nin $exists : -> Operator [ctor].
+
+
+endfm
+
+
+fmod DDL is
+
+    sort DDL .
+    
+    ops createDatabase createUnShardedCollection createShardedCollection dropDatabase dropCollection addIndex dropIndex addShard : -> DDL .
+
+endfm

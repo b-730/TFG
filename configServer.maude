@@ -1,0 +1,181 @@
+fmod COLLECTION-ROUTING-INFO is
+
+    pr SHARDKEY .
+    ex NAT .
+    pr JSON .
+    sort Routing-Info .
+    var b : Bool .
+    var n n' n'' : Nat .
+    var sk : ShardKey .
+    var J : JSON .
+
+    op RI : Bool Nat Nat ShardKey -> Routing-Info [ctor] .
+    op notFoundRI : -> Routing-Info [ctor] .
+    op notFound : -> Nat [ctor] .
+
+***(
+        bool= collection es sharded,
+        Nat= Primary shard de la base de datos en el caso de no ser sharded. idCounter en la base de datos no sharded.
+        Nat2 = Version de la collecion . 
+        ShardKey en caso de ser sharded 
+)
+
+    op getIsSharded : Routing-Info -> Bool .
+    eq getIsSharded(RI(b, n, n', sk)) = b .
+
+    op getShardID : Routing-Info -> Nat .
+    eq getShardID(RI(b, n, n', sk)) = n .
+
+    op getVersion : Routing-Info -> Nat .
+    eq getVersion(RI(b, n, n', sk)) = n' .
+
+    op getShardKey : Routing-Info -> ShardKey .
+    eq getShardKey(RI(b, n, n', sk)) = sk .
+
+    op getRoutingShard : Routing-Info JSON -> Nat .
+    ceq getRoutingShard(RI(b, n, n', sk), J) = n''
+        if b /\ n'' := getShard(sk, (J . getKeyname(sk))) .
+    eq getRoutingShard(RI(b, n, n', sk), J) =
+        if b then
+            notFound
+        else 
+            n
+        fi  [owise] .
+
+endfm
+
+view Routing-Info from TRIV to COLLECTION-ROUTING-INFO is
+    sort Elt to Routing-Info .
+endv
+
+fmod CONFIGSERVER is
+
+    pr REPLICASET .
+    pr QUERY .
+    pr SHARDKEY .    
+    pr COLLECTION-ROUTING-INFO .
+    pr SET{NameSpace} .
+    pr SET{Nat} .
+    pr CLUSTER .
+
+    var csrs : ReplicaSet .
+    var s dbn coln key : String .
+    var ns : NameSpace .
+    var n n' n'' version numShards : Nat .
+    var node : Node .
+    var nl : NodeList .
+    var uc : UnshardedCollection .
+    var siq : ShardedInsertQuery .
+    var iq : insertQuery .
+    var cq : CompleteQuery .
+    var sj : Set{JSON} .
+    var j j' j'' : JSON .
+    var sk sk' : ShardKey .
+
+    op CSRS : -> ReplicaSet .
+
+    eq CSRS = RS(leader | "Config" |-> ("Collections" |-> UC(empty, 0, 0), "Databases" |-> UC(empty, 0, 0), 
+    "Shards" |-> UC(empty, 0, 0)) | 0, (follower | "Config" |-> ("Collections" |-> UC(empty, 0, 0), "Databases" |-> UC(empty, 0, 0), "Shards" |-> UC(empty, 0, 0)) | 0) (follower | "Config" |-> ("Collections" |-> UC(empty, 0, 0), "Databases" |-> UC(empty, 0, 0), "Shards" |-> UC(empty, 0, 0)) | 0), UC(empty, 0, 0)) .
+
+    op updateShards : -> Query . 
+    op NSDB : -> NameSpace .
+    eq NSDB = NS("Config", "Databases") .
+    op NSCol : -> NameSpace .
+    eq NSCol = NS("Config", "Collections") .
+    op NSSh : -> NameSpace .
+    eq NSSh = NS("Config", "Shards") .
+
+    op createQueryUpdateCSRS : ReplicaSet CompleteQuery Nat -> QueryList .
+    eq createQueryUpdateCSRS(csrs, cq, n) = nullQuery [owise].
+    eq createQueryUpdateCSRS(csrs, DDLQ(ns, createDatabase, s), n) = CQ(NSDB , insertOne(v(("Name" |-> v(s), "Primary" |-> v(n))))) .
+    eq createQueryUpdateCSRS(csrs, DDLQ(ns, dropDatabase, s), n) = CQ(NSDB , delete(v(("Name" |-> v(s))))) .
+    eq createQueryUpdateCSRS(csrs, DDLQ(ns, addShard, s), n) = CQ(NSSh , insertOne(v(("Host" |-> v(n), "Size" |-> v(0)))))  .   
+    eq createQueryUpdateCSRS(csrs, DDLQ(NS(dbn, coln), createShardedCollection, key), n) = CQ(NSCol , insertOne(v(("NameSpace" |-> v(NS(dbn, coln)), "Counter" |-> v(0), "Version" |-> v(1), "Key" |-> v(key), "Shardkey" |-> v(newSK(key))))))  .
+    eq createQueryUpdateCSRS(csrs, DDLQ(NS(dbn, coln), createUnShardedCollection, key), n) = nullQuery .
+    eq createQueryUpdateCSRS(csrs, CQ(ns, SIQ(n'', version, insertOne(j))), n) =  CQ( NSSh, update(v("Host" |-> v(n)), v(("Size" |-> v( s((getNat((findOne(csrs, CQ( NSSh, find(v("Host" |-> v(n)))))) . "Size" )))))))) CQ(NSCol, update(v("NameSpace" |-> v(ns)), v( ("Version" |-> v(s(version)), "Counter" |-> v(s(getInsertShardedIDCounter(csrs, ns))), "Shardkey" |-> v(addKey(getShardKey(csrs, ns), ( j . (getKeyValue(csrs, ns))), findSmallestShard(csrs)))))) ) .
+    eq createQueryUpdateCSRS(csrs, CQ(ns, iq), n) =  CQ( NSSh, update(v("Host" |-> v(n)), v(("Size" |-> v( s((getNat((findOne(csrs, CQ( NSSh, find(v("Host" |-> v(n)))))) . "Size" )))))))) .
+
+***Get number of shards within the cluster
+    op numShards : ReplicaSet -> Nat .
+    eq numShards(csrs) = size(getCollection(csrs, NSSh)) .
+
+***Get key value name for a sharded collection .
+    op getKeyValue : ReplicaSet NameSpace -> String .
+    eq getKeyValue(csrs, ns) = getString((findOne(csrs, CQ(NSCol, find(v("NameSpace" |-> v(ns)))))) . "Key") .
+
+***Get ShardKey given a specific collection . If the collection is not sharded, it will return an empty shardKey .
+
+    op getShardKey : ReplicaSet NameSpace -> ShardKey .
+    ceq getShardKey(csrs, ns) = sk
+    if sk := getSK( findOne(csrs, CQ(NSCol, find(v("NameSpace" |-> v(ns))))) . "Shardkey" ) .
+    eq getShardKey(csrs, ns) = emptySK [owise] .
+
+***Get Routing info given a specific Collection .
+
+    op getRoutingInfo : ReplicaSet NameSpace Nat -> Routing-Info .
+    ceq getRoutingInfo(csrs, ns, n) = RI(isShardedCSRS(ns, csrs),  findPrimary(csrs, ns), n , getShardKey(csrs, ns)) 
+    if not isShardedCSRS(ns, csrs) .
+    eq getRoutingInfo(csrs, ns, n) = RI(isShardedCSRS(ns, csrs),  getInsertShardedIDCounter(csrs, ns), getVersionCSRS(csrs, ns) , getShardKey(csrs, ns)) [owise] .
+***Get namespaces. This is used to help update the cache memory. We only look for sharded collections' namespaces.
+
+    op getNameSpaces : ReplicaSet -> Set{NameSpace} .
+    ceq getNameSpaces(csrs) = getNameSpaces*(sj)
+    if sj := find(csrs, CQ(NSCol, findAll)) .
+
+    op getNameSpaces* : Set{JSON} -> Set{NameSpace} .
+    eq getNameSpaces*((j, sj)) = getNameSpace((j . "NameSpace")),  getNameSpaces*(sj) .
+    eq getNameSpaces*(empty) = empty .
+
+***Find smallest shard. This is used to asign a primary shard to a new database.
+
+    op findSmallestShard : ReplicaSet -> Nat .
+    ceq findSmallestShard(csrs) = findSmallestShard*(sj) 
+    if sj := find(csrs, CQ(NSSh, findAll)) .
+
+    op findSmallestShard* : Set{JSON} -> Nat .
+    eq findSmallestShard*((j, j', sj)) = 
+        if (j . "Size") > (j' . "Size") then
+            findSmallestShard*((j', sj))
+        else
+            findSmallestShard*((j, sj))
+        fi .
+
+    eq findSmallestShard*((j)) = getNat(j . "Host") .
+
+***Find primary Shard for a specific database . This is used both when creating a new unsharded collection and when inserting into an unsharded collection
+
+    op findPrimary : ReplicaSet NameSpace ~> Nat .
+    eq findPrimary(csrs, NS(dbn, coln)) = getNat((findOne(csrs, CQ(NSDB, find(v("Name" |-> v(dbn)))))) . "Primary") .
+
+***Get version for a sharded collection.
+    op getVersionCSRS : ReplicaSet NameSpace -> Nat .
+    eq getVersionCSRS(csrs, ns) = getNat((findOne(csrs, CQ(NSCol, find(v("NameSpace" |-> v(ns))))) . "Version")) .
+
+***Find the key value used to shard a sharded collection
+
+    op findKey : ReplicaSet NameSpace ~> String .
+    ceq findKey(csrs, ns) = getString(j . "Key")
+    if j := (findOne(csrs, CQ(NSCol, find(v("NameSpace" |-> v(ns)))))) .
+
+    op getInsertShardedIDCounter : ReplicaSet NameSpace ~> Nat .
+    eq getInsertShardedIDCounter(csrs, ns) = getNat(findOne(csrs, CQ(NSCol, find(v("NameSpace" |-> v(ns))))) . "Counter") .
+***getAllShardIDs
+    op getAllShards : ReplicaSet -> Set{Nat} .
+    eq getAllShards(csrs) = getAllShards*(find(csrs, CQ(NSSh, findAll))) .
+
+    op getAllShards* : Set{JSON} -> Set{Nat} .
+    ceq getAllShards*((j, sj)) = (getAllShards*(sj), n) 
+    if n := getNat(j . "Host") .
+    eq getAllShards*(empty) = empty .
+
+    *** Check if a collection is sharded. Only sharded collections are stored in the "collections" collection within the config database.
+    op isShardedCSRS : NameSpace ReplicaSet ~> Bool .
+    ceq isShardedCSRS(ns, csrs) = sj =/= empty 
+    if sj := find(csrs, CQ(NSCol, find(v("NameSpace" |-> v(ns))))) .
+    ***find shard of a collection
+    op findShardCol : NameSpace ReplicaSet ~> Nat .
+
+
+
+
+endfm

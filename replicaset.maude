@@ -1,0 +1,89 @@
+fmod REPLICASET is
+    pr NAMESPACE .
+    pr NODELIST .
+    pr COLLECTION .
+    pr QUERY .
+    pr QUERYLIST .
+    sorts ReplicaSet .
+
+    op RS : Node NodeList UnshardedCollection -> ReplicaSet [ctor]. ***primary node, el resto de nodes y el oplog
+
+    op _._ : ReplicaSet Query -> ReplicaSet .
+
+    var n n' n'' : Nat .
+    var node : Node .
+    var nodeList nl nl' : NodeList .
+    var s dbn coln : String .
+    var ddl : DDL .
+    var mj : Map{Nat, JSON} .
+    var ns : NameSpace .
+    var q : Query .
+    var cq cq' : CompleteQuery .
+    var oplog : UnshardedCollection .
+    var rs : ReplicaSet .
+    var nt : NodeType .
+    var dbm dbm' : DatabaseMap .
+    var db : Database .
+    var j : JSON .
+    var sj : Set{JSON} .
+    var ql : QueryList .
+    var ucq : UpdateCollection .
+    var c : Collection .
+
+
+    op newRS : -> ReplicaSet . ***Por defecto crea replicaset de tamaño 3
+    eq newRS = newRS(3) .
+    op newRS : Nat ~> ReplicaSet . 
+    ceq newRS(n) = RS(newNode(leader), newNodes(1, n), emptyUC)
+        if ( n rem 2 ) == 1 . ***El numero de nodos debe ser impar
+    
+    op newNodes : Nat Nat -> NodeList .
+    ceq newNodes(n, n') = nil
+        if n == n' .
+    eq newNodes(n, n') = newNode(follower) newNodes( s(n), n' ) [owise] .
+
+    op updateReplicaSet : ReplicaSet QueryList -> ReplicaSet .
+    eq updateReplicaSet(RS(node, nl, oplog), ql) = RS(update*(node, ql), nl, updateOplog*(oplog, ql)) .
+
+    op updateOplog* : UnshardedCollection QueryList -> UnshardedCollection .
+    eq updateOplog*(oplog, cq ql) = updateOplog*(updateOplog**(oplog, cq), ql ) .
+    eq updateOplog*(oplog, nil) = oplog .
+
+
+    op updateOplog** : UnshardedCollection CompleteQuery -> UnshardedCollection .
+    eq updateOplog**(oplog, nullQuery) = oplog .
+    eq updateOplog**(oplog, DDLQ(ns, ddl, s)) = oplog insertOne(v(("namespace" |-> v(ns), "type" |-> v("DDL"), "op" |-> v(ddl), "value" |-> v(s)))).
+    eq updateOplog**(oplog, CQ(ns, q)) = oplog insertOne(v(("namespace" |-> v(ns), "type" |-> v("Query"), "op" |-> v(q)))) [owise] .
+
+    op allUpdated : NodeList UnshardedCollection -> Bool .
+    eq allUpdated((node nl), oplog) = updated(node, oplog) and allUpdated(nl, oplog) .
+    eq allUpdated((nil), oplog) = true .
+
+    op find : ReplicaSet CompleteQuery -> Set{JSON} .
+    eq find(RS(node, nl, oplog), cq) = find(node, cq) .
+
+    op findOne : ReplicaSet CompleteQuery -> JSON .
+    eq findOne(rs, cq) = getFirst(find(rs, cq)) .
+    op getFirst : Set{JSON} -> JSON .
+    eq getFirst((j, sj)) = j .
+    eq getFirst(empty) = null .
+
+    op getCollection : ReplicaSet NameSpace -> Collection .
+    ceq getCollection(RS((nt | (dbm, dbn |-> db, dbm') | n ), nl, oplog), NS(dbn, coln)) = c
+    if c := db[coln] .
+
+    op getVersionRS : ReplicaSet NameSpace  -> Nat .
+    eq getVersionRS(rs, ns) = 0 .
+endfm
+
+view ReplicaSet from TRIV to REPLICASET is
+    sort Elt to ReplicaSet .
+endv
+
+fmod SHARDMAP is
+    pr MAP{Nat, ReplicaSet} * (sort Map{Nat, ReplicaSet} to ShardMap) .
+
+endfm
+
+
+

@@ -1,0 +1,47 @@
+fmod METADATA-CACHE is
+
+    pr MAP{NameSpace, Routing-Info} * (sort Map{NameSpace, Routing-Info} to Cache) .
+
+endfm
+
+fmod CACHE is
+
+    pr METADATA-CACHE .
+    pr REPLICASET .
+    pr CONFIGSERVER .
+    pr SET{NameSpace} .
+    pr MAP{Nat, Nat} .
+    pr SET{JSON} .
+
+
+    op newCache : -> Cache .
+    eq newCache = empty .
+
+    var csrs : ReplicaSet .
+    var c c' : Cache .
+    var s coln dbn : String .
+    var ri : Routing-Info .
+    var ns : NameSpace .
+    var sns : Set{NameSpace} .
+    var mnn : Map{Nat, Nat} .
+    var sj : Set{JSON} .
+    var j : JSON .
+    var sk : ShardKey .
+    var v : Value .
+    var n n' : Nat .
+
+    ***Update cache for sharded collections. Unsharded Collections' info is updated when there is a staleinfo exception as we access said metadata.
+    op updateCache : ReplicaSet NameSpace Nat Cache -> Cache .
+    ceq updateCache(csrs, ns, n, c) = c'
+    if c' := insert(ns, getRoutingInfo(csrs, ns, n), c) .
+    op removeEntry : NameSpace Cache ~> Cache .
+    eq removeEntry(ns, (c, ns |-> ri, c')) = (c, c') .
+
+    op getRoutingInfo : Cache NameSpace -> Routing-Info .
+    eq getRoutingInfo(c, ns) = notFoundRI [owise] .
+    ceq getRoutingInfo(c, ns) = c[ns]
+    if $hasMapping(c, ns) .
+
+
+
+endfm

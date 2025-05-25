@@ -1,0 +1,101 @@
+***los valores de la shardkey deben ser únicos
+
+***(
+fmod RANGEVALUE is
+
+    pr VALUE .
+
+    sort RangeValue Range Range? .
+    subsort Range < Range? .
+    subsort Value < RangeValue .
+
+    var v v' v'' : Value .
+    var rv rv' : RangeValue .
+
+    op [_,_] : RangeValue RangeValue -> Range? .
+
+    cmb [v, v'] : Range
+        if v < v' .
+    
+    op minValue : Range -> RangeValue .
+    op maxValue : Range -> RangeValue .
+
+    eq minValue([rv, rv']) = rv . ***?
+    eq maxValue([rv, rv']) = rv' . ***?
+
+    op inside : Value Range -> Bool .
+    eq inside(v', [v, v'']) = (v < v') and (v' <= v'') .
+
+
+endfm
+
+view Range from TRIV to RANGEVALUE is
+    sort Elt to  Range .
+endv
+)
+
+fmod SHARDKEY is
+
+    ex VALUE .
+    ex MAP{Value, Nat} .
+    sorts TypeShardKey ShardKey ShardValues .       
+    subsort Map{Value, Nat} < ShardValues .
+
+    var svs : ShardValues .
+    var v v' v'' : Value .
+    var mv : Map{Value, Nat} .
+    var sk : ShardKey .
+    var n : Nat .
+    var s : String .
+
+    op emptySK : -> ShardKey [ctor] .   
+
+    op hashBased : -> TypeShardKey [ctor] .
+    op SK : TypeShardKey ShardValues String -> ShardKey [ctor] . ***String = key value name
+
+    op newSK : String -> ShardKey .
+    eq newSK(s) = SK(hashBased, empty, s) .
+
+    op v : ShardKey -> Value [ctor] .
+    op getSK : Value ~> ShardKey .
+    eq getSK(v(sk)) = sk .
+
+    op addKey : ShardKey Value Nat ~> ShardKey .
+    ceq addKey(SK(hashBased, mv, s), v, n) = SK(hashBased, (mv, v |-> n), s)
+    if not $hasMapping(mv, v) .
+    eq addKey(sk, v, n) = sk [owise] . 
+
+    op getShard : ShardKey Value ~> Nat .
+    eq getShard(SK(hashBased, mv, s), v) = mv[v] .
+
+    op getKeyname : ShardKey -> String .
+    eq getKeyname(SK(hashBased, mv, s)) = s .
+    
+
+
+***(
+    ***pr RANGEVALUE .
+    ***ex LIST{Range} .
+        var r r' : Range .
+
+    ***var lr : List{Range} .
+
+    sort ShardKey? .
+    ***subsort List{Range} < ShardValues .
+    subsort ShardKey < ShardKey? .
+    op [_,_] : TypeShardKey ShardValues -> ShardKey? .
+    cmb [valueBased, lr] : ShardKey 
+        if validRanges(lr) .
+
+    mb [hashBased, mv] : ShardKey .
+
+    op validRanges : ShardValues -> Bool .
+    eq validRanges(r r' svs) = maxValue(r) < minValue(r') and validRanges(r' svs) .
+    eq validRanges(svs) = true [owise] .
+
+    op _._ : ShardKey Value ~> Nat .
+    ***ceq ([ valueBased, ( [v, v''] lr)]) . v' = 
+)
+
+
+endfm

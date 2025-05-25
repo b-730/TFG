@@ -1,0 +1,108 @@
+fmod MONGOS is
+
+    pr CACHE .
+    pr CONFIGSERVER .
+    pr QUERY .
+
+    sort Mongos .
+    var dbn coln : String .
+    var m mongos refreshedMongos : Mongos .
+    var cl : Cluster .
+    var n n' n'' version version' : Nat .
+    var q : Query .
+    var c c' : Cache .
+    var csrs : ReplicaSet .
+    var ns : NameSpace .
+    var cq : CompleteQuery .
+    var ddql : DDLQuery .
+    var iq : insertQuery .
+    var j : JSON .
+    var s : String .
+    var ri : Routing-Info .
+    var sj : Set{JSON} .
+    var sk : ShardKey .
+    var ddlq : DDLQuery .
+    var J : JSON .
+    var fq : findQuery .
+
+
+    op  MGS : Cache ReplicaSet -> Mongos [ctor] . ***replicaset = configServer
+
+    ***New empty mongos
+    op newMongos : -> Mongos .
+    eq newMongos = MGS(newCache, CSRS) .
+
+    ***mongos deals with ddl and dml queries diferently
+    op findShardDDLQ : Mongos CompleteQuery ~>  Nat .
+    eq findShardDDLQ(MGS(c, csrs), DDLQ(ns, createDatabase, s)) = findSmallestShard(csrs).
+    eq findShardDDLQ(MGS(c, csrs), DDLQ(ns, createShardedCollection, s)) = findSmallestShard(csrs) .
+    eq findShardDDLQ(MGS(c, csrs), DDLQ(ns, createUnShardedCollection, s)) = findPrimary(csrs, ns) .
+
+    op collectionIsSharded : Mongos NameSpace -> Bool .
+    eq collectionIsSharded(MGS(c, csrs), ns) = isShardedCSRS(ns, csrs) .
+    
+    op findShard : Mongos CompleteQuery ~>  Routing-Info .
+    eq findShard(MGS(c, csrs) , CQ(ns, q)) = getRoutingInfo(c, ns) .
+    ***Insert info into cache
+    op insertInfo : Mongos NameSpace Nat -> Mongos .
+    eq insertInfo(MGS(c, csrs), ns, n) =  MGS(updateCache(csrs, ns, n, c), csrs) .
+
+    op validShardedInsert : Mongos NameSpace Set{JSON} -> Bool .
+    eq validShardedInsert(m, ns, (j, sj)) = validShardedInsert*(m, ns, j) and validShardedInsert(m, ns, sj) .
+    eq validShardedInsert(m, ns, empty) = true .
+
+    op deleteCacheEntry : Mongos NameSpace ~> Mongos .
+    ceq deleteCacheEntry(MGS(c, csrs), ns) = MGS(c', csrs)
+    if c' := removeEntry(ns, c) .
+
+    op validShardedInsert* : Mongos NameSpace JSON -> Bool .
+    ceq validShardedInsert*(MGS(c, csrs), ns, j) = isShardedCSRS(ns, csrs) and ((j . s)  =/= notFound)
+    if s := (findKey(csrs, ns)) .
+    eq validShardedInsert(m, ns, j) = false [owise] .
+
+    op isBroadcast : Mongos CompleteQuery -> Bool .
+    ***we broadcast the find query if is sharded and it follows this pattern with its sharded key value {key : { $op : value } } since the shardkey is hashed.
+    ceq isBroadcast(MGS(c, csrs), CQ(ns, find(j))) = ((findOp(j . getKeyname(sk)))) and isShardedCSRS(ns, csrs)
+    if sk := getShardKey(csrs, ns) /\ (j . getKeyname(sk) =/= notFound) . 
+    ceq isBroadcast(MGS(c, csrs), CQ(ns, find(j))) = isShardedCSRS(ns, csrs) and (j . getKeyname(sk) == notFound)
+    if sk := getShardKey(csrs, ns) . 
+    eq isBroadcast(MGS(c, csrs), CQ(ns, findAll)) = isShardedCSRS(ns, csrs) . 
+    eq isBroadcast(m, cq) = false [owise] .
+
+    op updateCache : Mongos Cluster CompleteQuery -> Mongos .
+
+    ***Insert query. Cache memory is stale
+    ceq updateCache(MGS(c, csrs), cl, CQ(ns, iq)) = refreshedMongos
+        if ri := findShard(MGS(c, csrs), CQ(ns, iq)) /\ (ri =/= notFoundRI) /\ n' := getShardID(ri) /\ version := getVersion(ri) /\ version' := getVersionCollection(cl, ns, getShardID(ri)) /\ (version =/= version') /\ 
+    refreshedMongos := insertInfo(MGS(c, csrs), ns, getVersionCollection(cl, ns, getShardID(ri))) .
+    ***Insert query. Unsharded collection not found in cache.
+    ceq updateCache(MGS(c, csrs), cl, CQ(ns, iq)) = refreshedMongos
+    if (not collectionIsSharded(MGS(c, csrs), ns)) /\ ri := findShard(MGS(c, csrs), CQ(ns, iq)) /\ (ri == notFoundRI) /\ collectionExistsInShard(cl, ns, findPrimary(csrs, ns))
+     /\ refreshedMongos := insertInfo(MGS(c, csrs), ns, getVersionCollection(cl, ns, findPrimary(csrs, ns))) .
+    *** Non broadcast find query. Routing info found and collection doesnt exist
+    ceq updateCache(mongos, cl, CQ(ns, find(J))) = refreshedMongos 
+        if (not isBroadcast(mongos, CQ(ns, find(J)))) /\ ri := findShard(mongos, CQ(ns, find(J))) /\ (ri =/= notFoundRI) /\ n' := getRoutingShard(ri, J)
+     /\ version' := getVersionCollection(cl, ns,  n') /\ (version' == notFound ) /\ refreshedMongos := deleteCacheEntry(mongos, ns) .
+    ***Non broadcast find query. Routing info found. Cache stale.
+    ceq updateCache(MGS(c, csrs), cl, CQ(ns, find(J))) = refreshedMongos
+    if not isBroadcast(MGS(c, csrs), CQ(ns, find(J))) /\ ri := findShard(MGS(c, csrs), CQ(ns, find(J))) /\ (ri =/= notFoundRI) /\ n' := getRoutingShard(ri, J)
+        /\ version := getVersion(ri) /\ version' := getVersionCollection(cl, ns,  n') /\
+        (version =/= version') /\ refreshedMongos := insertInfo(MGS(c, csrs), ns, getVersionCollection(cl, ns, findPrimary(csrs, ns))) .
+    ***Non broadcast find query. Routing info found. ShardID not found within shardkey 
+    ceq updateCache(MGS(c, csrs), cl, CQ(ns, find(J))) = refreshedMongos
+    if not isBroadcast(MGS(c, csrs), CQ(ns, find(J))) /\ ri := findShard(MGS(c, csrs), CQ(ns, find(J))) /\ (ri =/= notFoundRI) /\ n' := getRoutingShard(ri, J)
+        /\ version := getVersion(ri) /\ (version == notFound) /\  refreshedMongos := insertInfo(MGS(c, csrs), ns, getVersionCollection(cl, ns, findPrimary(csrs, ns))) .
+    ***Non broadcast find query. Routing info not found and sharded collection exists      
+    ceq updateCache(MGS(c, csrs), cl, CQ(ns, find(J))) = refreshedMongos
+       if not isBroadcast(MGS(c, csrs), CQ(ns, find(J))) /\ ri := findShard(MGS(c, csrs), CQ(ns, find(J))) /\ (ri == notFoundRI) /\ isShardedCSRS(ns, csrs ) /\ refreshedMongos := insertInfo(MGS(c, csrs), ns, notFound) .
+    ***Non broadcast find query. Routing info not found and unsharded collection exists      
+    ceq updateCache(MGS(c, csrs), cl, CQ(ns, find(J))) = refreshedMongos
+       if not isBroadcast(MGS(c, csrs), CQ(ns, find(J))) /\ ri := findShard(MGS(c, csrs), CQ(ns, find(J))) /\ (ri == notFoundRI) /\ (not isShardedCSRS(ns, csrs )) /\  n'' := findPrimary(csrs, ns) /\ collectionExistsInShard(cl, ns, n'') /\ refreshedMongos := insertInfo(MGS(c, csrs), ns, notFound) .
+    eq updateCache(m, cl, cq) = m [owise] .
+
+***TODO revisar
+
+
+
+endfm
+

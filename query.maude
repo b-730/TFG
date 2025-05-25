@@ -1,0 +1,171 @@
+
+
+fmod QUERY is
+    pr DATABASE .
+    pr DDL .
+    pr SET{JSON} .
+    pr VALUE .
+    ex PROTO-QUERY .
+
+    sorts findQuery insertQuery deleteQuery DDLQuery CompleteQuery UpdateCollection ShardedInsertQuery UpdateQuery .
+    subsorts insertQuery deleteQuery UpdateQuery < UpdateCollection .
+    subsort ShardedInsertQuery < insertQuery .
+    subsorts findQuery UpdateCollection DDLQuery < Query .
+    subsorts  DDLQuery < CompleteQuery .
+
+
+
+    var N N' N'' : Nat .
+    var SJ SJ' : Set{JSON} .
+    var MJ MJ' : Map{Nat, JSON} .
+    var UC UC' : UnshardedCollection .
+    var CC : ShardedCollection .
+    var C : Collection .
+    var S S' : String .
+    var V V' : Value .
+    var J J' JP : JSON .
+    var K K' : Key .
+    var MKV : Map{Key, Value} .
+    var SK : Set{Key} .
+    var O : Operator .
+    var Q : Query .
+    var D : Database .
+    var mkv mkv' mkv'' mkv''' : Map{Key, Value} .
+    var ns : NameSpace .
+    var ddl : DDL .
+
+    op nullQuery : -> CompleteQuery .
+    op CQ : NameSpace Query -> CompleteQuery [ctor] .
+    op DDLQ : NameSpace DDL String -> DDLQuery [ctor] . ***las ddql son queries que afectan a la estructura interna
+    op find : JSON -> findQuery [ctor] .
+    op findAll : -> findQuery [ctor] .
+    op insertOne : JSON -> insertQuery [ctor] . 
+    op insertMany : Set{JSON} -> insertQuery [ctor] .
+    op delete : JSON -> deleteQuery [ctor] .
+    op SIQ : Nat Nat insertQuery -> ShardedInsertQuery [ctor] . 
+    op update : JSON JSON -> UpdateQuery  [ctor] .
+
+    op getJSONS : insertQuery -> Set{JSON} .
+    eq getJSONS(insertOne(J)) =  J .
+    eq getJSONS(insertMany(SJ)) = SJ .
+
+    op getNS : CompleteQuery -> NameSpace .
+    eq getNS(CQ(ns, Q)) = ns .
+    eq getNS(DDLQ(ns, ddl, S)) = ns .
+
+
+  ***delete
+    op __ : Collection UpdateCollection -> Collection .
+    op ____ : ShardedCollection Nat Nat UpdateCollection ~> ShardedCollection .
+    op ___ : ShardedCollection Nat UpdateCollection ~> ShardedCollection .
+
+
+    op delete1 : Set{JSON} -> deleteQuery [ctor] .
+
+    eq C delete(J) = increaseVersion(C  delete1((C . find(J)))) .
+    eq UC((MJ, N |-> J, MJ'),  N', N'') delete1((SJ, J, SJ')) = UC((MJ, MJ'),  N', N'') delete1((SJ, SJ')) .
+    eq SC((MJ, N |-> J, MJ'), N) N' delete1((SJ, J, SJ')) = SC((MJ, MJ'), N') delete1((SJ, SJ')) .
+    eq C delete1(empty) = C .
+    eq UC((empty),  N', N'') delete1(SJ) = UC((empty), N', N'') . 
+    eq SC((empty), N) delete1(SJ) = SC((empty), N) . 
+
+  ***Insert  
+
+    ceq UC(MJ, N, N') insertOne(J) = UC
+        if MJ' := insert(N, J, MJ) /\ UC := UC(MJ', s(N), s(N')) /\ UC' := UC(MJ, N, N') .
+    ceq SC(MJ, N') N N'' insertOne(J) = SC(insert(N, J, MJ), s(N''))
+        if J : JSON .
+    
+    ceq UC insertMany((J, SJ)) = (UC insertOne(J)) insertMany(SJ) 
+        if J : JSON .
+    eq UC insertMany(empty) = UC .
+
+    ceq CC N N' insertMany((J, SJ)) = (CC s(N) insertOne(J)) N N' insertMany(SJ)
+    if J : JSON .
+    eq SC(MJ, N') N N'' insertMany(empty) = SC(MJ, s(N'')) .
+
+  ***update
+    ceq C update(J, J') = C update2(SJ, J')
+    if SJ := C . find(J) .
+    op update2 : Set{JSON} JSON -> UpdateQuery  [ctor] .
+
+    eq UC((MJ, N |-> J , MJ'), N', N'') update2((J, SJ), J') = increaseVersion(UC((MJ, N |-> update3(J, J') , MJ'), N', N'') update2((SJ), J')) .
+    eq SC((MJ, N |-> J , MJ'), N') N'' update2((J, SJ), J') = SC((MJ, N |-> update3(J, J') , MJ'), N'') update2((SJ), J') .
+    eq C update2(empty, J) = C .
+
+    op update3 : JSON JSON ~> JSON .
+    eq update3(v((mkv, K |-> V, mkv')), v((mkv'', K |-> V', mkv''')))= update3(v( (mkv, K |-> V', mkv')), v((mkv'', mkv'''))) .
+    eq update3(v(mkv), v(mkv')) = v((mkv, mkv')) [owise] .
+    
+
+
+***find query
+  op _._ : Collection findQuery -> Set{JSON} .
+  ***Find all
+
+    eq UC(MJ, N, N') . findAll = mapToSetJSON(MJ) .
+    eq SC(MJ, N) . findAll =  mapToSetJSON(MJ) .
+
+    op mapToSetJSON : Map{Nat, JSON} -> Set{JSON} .
+    eq mapToSetJSON( (N |-> J, MJ) )  = J, mapToSetJSON(MJ) .
+    eq mapToSetJSON(empty) = empty .
+
+  ***Find many
+    eq UC(MJ, N, N') . find(JP) = MJ . find(JP) .
+    eq SC(MJ, N) . find(JP) = MJ . find(JP) .
+
+    op _._ : Map{Nat, JSON} findQuery -> Set{JSON} .
+    eq empty . find(JP) = empty .
+    ceq (N |-> J, MJ) . find(JP) = (J,  (MJ .  find(JP)))
+      if evaluate(J, JP) .
+    eq (N |-> J, MJ) . find(JP) = MJ . find(JP) .  
+    
+    op evaluate : JSON JSON -> Bool .
+    eq evaluate(J, JP) = evaluate*(J, JP, getKeys(JP)) .
+
+
+    op evaluate* : JSON JSON Set{Key} -> Bool .
+***caso base    
+    eq evaluate*(J, JP, empty) = true .
+
+***(
+si la entrada del JSON sigue este formato:
+"status": "shipped"
+)
+    ceq evaluate*(J, JP, (K, SK)) = evaluate(J, K , (JP . K)) and evaluate*(J, JP, SK) 
+      if not findOp((JP . K)) .
+    op evaluate : JSON Key Value -> Bool .
+    eq evaluate (J, K, V) = (J . K) = V .      
+
+***(
+si la entrada del JSON tiene operadores:
+
+  "items": { $lte: 9 }
+
+)
+    eq evaluate*(J, JP , (K, SK)) = evaluate**(J, K, (JP . K)) and evaluate*(J, JP, SK) [owise] .
+
+
+    op evaluate** : JSON Key Value -> Bool .
+    eq evaluate**(J, K, v(O |-> V)) = evaluate(J, K, O, V) .
+ 
+    op evaluate : JSON Key Operator Value -> Bool .
+    eq evaluate(J, K, O, V) = ((J . K) O V) . 
+
+
+
+    
+    
+  eq UC((N |-> J, MJ),  N', N'') . find(JP) = empty [owise] .
+
+endfm
+
+
+view CompleteQuery from TRIV to QUERY is
+    sort Elt to CompleteQuery .
+endv
+
+fmod QUERYLIST is
+    pr LIST{CompleteQuery} * (sort List{CompleteQuery} to QueryList) .
+endfm
+

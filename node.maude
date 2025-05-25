@@ -1,0 +1,107 @@
+fmod NODE is
+
+    pr DATABASEMAP .
+    pr DDL .
+    pr QUERY .
+    pr QUERYLIST .
+
+    sort Node NodeType .
+
+    var dbm dbm' : DatabaseMap .
+    var s dbn col : String .
+    var node : Node .
+    var nt : NodeType .
+    var n n' n'' id  version : Nat .
+    var ns : NameSpace .
+    var uc : UnshardedCollection .
+    var sc : ShardedCollection .
+    var mj  mj' : Map{Nat, JSON} .
+    var mkv mkv' : Map{Key, Value} .
+    var db db' : Database .
+    var c : Collection .
+    var q : Query .
+    var iq : insertQuery .
+    var cq : CompleteQuery .
+    var j : JSON .
+    var ql : QueryList .
+    var fq : findQuery .
+
+    ops follower leader : -> NodeType [ctor] .
+    op _|_|_ : NodeType DatabaseMap Nat -> Node [ctor] . ***nat = contador/cursorhernan  oplog
+    
+    op newNode : NodeType -> Node .
+    eq newNode(nt) = nt | empty | 0 .
+    
+    op update : Node UnshardedCollection ~> Node . ***Actualizar nodo en base al oplog
+    ceq update((follower | dbm | n), UC(mj,  n', n'')) = update((follower | dbm | n), DDLQ(getNameSpace(((mj[n]) . "namespace")), getDDL(((mj[n]) . "op")),  getString(((mj[n]) . "value"))))
+        if getString(((mj[n]) . "type")) == "DDL" .
+
+    ceq update((follower | dbm | n), UC(mj, n', n'')) = update((follower | dbm | n), CQ(getNameSpace(((mj[n]) . "namespace")), getQuery(((mj[n]) . "op"))))
+        if getString(((mj[n]) . "type")) == "Query" .
+    
+    eq update((follower | dbm | n), UC((mj, (n |-> v( (mkv, "namespace" |-> v(ns), "op" |-> v(q), mkv' ))), mj'), n', n'')) = update((follower | dbm | n), CQ(ns, q)) .
+    eq update((follower | dbm | n), UC(mj, n', n'')) = (follower | dbm | n) [owise] .
+   
+
+    op updated : Node UnshardedCollection -> Bool .
+    eq updated((nt | dbm | n), UC(mj , n', n'')) = n == n' .
+
+
+    op update* : Node QueryList -> Node .
+    eq update*(node, cq ql) = update*(update(node, cq), ql ) .
+    eq update*(node, nil) = node .
+
+    op update : Node CompleteQuery ~> Node .
+    ***DDL queries
+
+    eq update(node, nullQuery) = node .
+    ***create database
+    ceq update((nt | dbm | n), DDLQ(ns, createDatabase, s)) = (nt | (dbm, s |-> empty) | s(n))
+        if dbm[s] == undefined .
+    ***drop database
+    eq update((nt | (dbm, s |-> db, dbm') | n), DDLQ(ns, dropDatabase, s)) = (nt | (dbm, dbm') | s(n)) .
+
+    ***createUnshardedCollection
+    ceq update((nt | (dbm, dbn |-> db, dbm') | n), DDLQ(NS(dbn, col), createUnShardedCollection, s)) = (nt | (dbm, dbn |-> (db, s |-> emptyUC) ,dbm') | s(n))
+    if db[s] == undefined .
+    ***createShardedCollection The DB is present in the shard    
+    ceq update((nt | (dbm, dbn |-> db, dbm') | n), DDLQ(NS(dbn, col), createShardedCollection, s)) = (nt | (dbm, dbn |-> (db, col |-> emptySC),dbm') | s(n))
+    if db[s] == undefined .
+    ***createShardedCollection The DB is not present in the shard    
+    eq update((nt | (dbm) | n), DDLQ(NS(dbn, col), createShardedCollection, s)) = (nt | (dbm, dbn |-> (col |-> emptySC)) | s(n)) .
+
+    ***dropCollection
+    eq update((nt | (dbm, dbn |-> (db, s |-> c, db'), dbm') | n), DDLQ(NS(dbn, col), dropCollection, s)) = (nt | (dbm, dbn |-> (db, db'), dbm') ,dbm' | s(n)) .
+    
+    ***insert into UnshardedCollection
+    eq update((nt | (dbm, dbn |-> (db, col |-> uc, db') , dbm')| n), (CQ(NS(dbn, col), q))) = (nt | (dbm, dbn |-> (db, col |-> (uc q), db'), dbm') | s(n)) .
+
+    ***insert into shardedCollection
+    eq update((nt | (dbm, dbn |-> (db, col |-> sc, db') , dbm')| n), (CQ(NS(dbn, col), SIQ(id, version, q)))) = (nt | (dbm, dbn |-> (db, col |-> (sc id version q), db'), dbm') | s(n)) .
+    ceq update((nt | (dbm, dbn |-> (db) , dbm')| n), (CQ(NS(dbn, col), SIQ(id, version, q)))) = (nt | (dbm, dbn |-> (db, col |-> (emptySC id version q)), dbm') | s(n))
+    if db[col] == undefined .
+    ceq update((nt | (dbm)| n), (CQ(NS(dbn, col), SIQ(id, version, q)))) = (nt | (dbm, dbn |-> (col |-> (emptySC id version q))) | s(n))
+    if dbm[dbn] == undefined .
+    
+    ***other updates
+    eq update((nt | (dbm, dbn |-> (db, col |-> sc, db') , dbm')| n), (CQ(NS(dbn, col), q))) = (nt | (dbm, dbn |-> (db, col |-> (sc q), db'), dbm') | s(n)) .
+
+
+
+    op find : Node CompleteQuery -> Set{JSON} .
+    ceq find((nt | dbm, dbn |-> db, dbm | n), CQ(NS(dbn, col), fq)) = db[col] . fq 
+    if $hasMapping(db, col) .
+    eq find(node, cq) = empty [owise] .
+
+    
+
+endfm
+
+view Node from TRIV to NODE is
+    sort Elt to Node .
+endv
+
+***Dado que no puede haber elementos repetidos en un set, hemos elegido una lista
+fmod NODELIST is
+    pr LIST{Node} * (sort List{Node} to NodeList) .
+endfm

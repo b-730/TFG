@@ -1,0 +1,21 @@
+load operator
+load date
+load value
+load json
+load collection
+load database
+load query
+load node
+load replicaset
+
+load shardkey
+
+load cluster
+load configServer
+load cache
+
+load mongos
+load mongosh
+load mongodb
+
+*** load io.maude

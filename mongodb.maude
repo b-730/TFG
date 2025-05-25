@@ -1,0 +1,261 @@
+
+mod MONGODB is
+
+    pr MONGOSH .
+    pr MONGOS .
+    pr CLUSTER .
+    pr SET{Nat} .
+
+    sort MongoDB Msg Component .
+
+    subsorts Mongos Mongosh Cluster Msg ReplicaSet MongoDB  < Component .
+
+    ***subsort Set{JSON}  < Msg .
+
+    op MDB : Mongos Cluster -> MongoDB .
+
+    op __ : Component Component -> Component [ctor comm] .
+
+    op newMongoDB : -> MongoDB .
+    eq newMongoDB = MDB(newMongos, newCL) .
+
+    var c : Cache .
+    var n n' n'' shid version version' : Nat .
+    var s s' dbn coln k : String .
+    var cq cq' : QueryList .
+    var cl cl' : Cluster .
+    var rs rs' : ReplicaSet .
+    var shm shm' : ShardMap .
+    var mongos refreshedMongos mongos' m : Mongos .
+    var node node' node'' : Node .
+    var nl nl' : NodeList .
+    var oplog oplog' : UnshardedCollection .
+    var j J : JSON .
+    var errRS : [ReplicaSet] .
+    var errNode : [Node] .
+    var errOplog : [UnshardedCollection] .
+    var mdb : MongoDB .
+    var b : Bool .
+    var ns : NameSpace .
+    var q : Query .
+    var ri ri' : Routing-Info .
+    var iq : insertQuery .
+    var ddlq : DDLQuery .
+    var fq : findQuery .
+    var sj sj' : Set{JSON} .
+    var sn : Set{Nat} .
+
+
+***Adding a new shard to the cluster  
+    op addShard : Nat -> Msg [ctor] .
+    op addShard : -> Msg [ctor] .
+    op shardCreated : -> Msg [ctor] .
+    op errAddShard : -> Msg [ctor] .
+
+*** agregar un shard al cluser con un replicaset de tamaño por defecto (3) 
+    crl [createshardDefault] :
+    addShard
+    MDB(mongos, CL(n, shm))
+    => MDB((mongos UpdateMongos(DDLQ(nullNS, addShard, ""), n)), CL(s(n), shm')) shardCreated
+    if shm' := insert (n, newRS, shm) .
+
+*** agregar un shard al cluser con n' nodos en el replicaset
+    crl [createshardOK] :
+    addShard(n')
+    MDB(mongos, CL(n, shm))
+    => MDB((mongos UpdateMongos(DDLQ(nullNS, addShard, ""), n)), CL(s(n), shm')) shardCreated
+    if shm' := insert (n, newRS(n'), shm) /\ rs := newRS(n') .
+
+*** error al agregar un shard al cluser con n' nodos en el replicaset (n' es par)
+    crl [createshardKO] : 
+    addShard(n)
+    MDB(mongos, cl)
+    => MDB(mongos, cl) errAddShard
+    if errRS := newRS(n) .
+
+*** update ReplicaSet
+    op updateRS : QueryList -> Msg [ctor] .
+    op updateSecondaries : -> Msg [ctor] .
+    op ERRupdateRS : -> Msg [ctor] .
+    op ERRUpdateSecondaries : -> Msg [ctor] . 
+    ***First, we update the leader node and the oplog. 
+    crl [updateRS] : 
+    updateRS(cq)
+    rs
+    => rs' updateSecondaries
+    if rs' := updateReplicaSet(rs, cq) .
+    ***Then, we update the secondaries based on the oplog.
+    crl [updateSecondaries] :
+    updateSecondaries
+    RS(node, nl node' nl', oplog)
+    => RS(node, nl node'' nl', oplog) updateSecondaries
+    if not updated(node', oplog) /\
+    node'' := update(node', oplog) .
+    ***When the process is over, we remove the message.
+    crl [removeUpdateMsg] :
+    updateSecondaries
+    RS(node, nl, oplog)
+    => RS(node, nl, oplog)
+    if allUpdated(nl, oplog) .
+
+
+***Router
+    ***We devide the routing process in two steps.
+    op Router : QueryList -> Msg [ctor] .
+    op Router2 : QueryList -> Msg [ctor] .
+    op UpdateShards : QueryList Nat -> Msg [ctor] .
+    op errUpdate1 : -> Msg .
+    op noRoutingInfo : -> Msg [ctor] .
+
+    ***Cache memory is not stale +
+    crl [RouterCacheNotStale] : 
+    Router2(CQ(ns, iq))
+    MDB(mongos, cl)
+    => MDB((mongos UpdateMongos(CQ(ns, iq), n')), cl) UpdateCluster(CQ(ns, iq), n')
+    if ri := findShard(mongos, CQ(ns, iq)) /\ (ri =/= notFoundRI) /\ n' := getShardID(ri) /\ version := getVersion(ri) /\ version' := getVersionCollection(cl, ns, getShardID(ri)) /\ ((version == version') or version' == notFound ) .
+    ***Cache memory is stale +
+    crl [UpdateStaleCache] : 
+    Router(CQ(ns, iq))
+    MDB(MGS(c, rs), cl)
+    => MDB(refreshedMongos, cl) Router2(CQ(ns, iq))
+    if ri := findShard(MGS(c, rs), CQ(ns, iq)) /\ (ri =/= notFoundRI) /\ n' := getShardID(ri) /\ version := getVersion(ri) /\ version' := getVersionCollection(cl, ns, getShardID(ri)) /\ (version =/= version') /\ 
+    refreshedMongos := insertInfo(MGS(c, rs), ns, getVersionCollection(cl, ns, getShardID(ri))) .
+***DDL queries. +
+    crl [RouterDDLQueries] :
+    Router(ddlq)
+    MDB(mongos, CL(n, shm))
+    => MDB((mongos UpdateMongos(ddlq, n')), CL(n, shm)) UpdateCluster(ddlq, n')
+    if n' := findShardDDLQ(mongos, ddlq).
+***Insert queries.
+    ***Insert query. Collec is sharded. +
+    crl [RouterInsertSharded] :
+    Router(CQ(ns, iq))
+    MDB(MGS(c, rs), cl)
+    => MDB((MGS(c, rs)  UpdateMongos(cq, n')), cl) UpdateCluster(cq, n')
+    if validShardedInsert(MGS(c, rs), ns, getJSONS(iq)) /\ n' := findSmallestShard(rs) /\ cq := CQ(ns, SIQ(getInsertShardedIDCounter(rs, ns), getVersionCSRS(rs, ns), iq)) .
+    ***Insert query. Unsharded Collection not found in the cache. +
+    crl [RouterUnShardedNotFound] :
+    Router(CQ(ns, iq))
+    MDB(MGS(c, rs), cl)
+    => MDB(refreshedMongos, cl) Router2(CQ(ns, iq)) noRoutingInfo
+    if (not collectionIsSharded(MGS(c, rs), ns)) /\ ri := findShard(MGS(c, rs), CQ(ns, iq)) /\ (ri == notFoundRI) /\ collectionExistsInShard(cl, ns, findPrimary(rs, ns))
+     /\ refreshedMongos := insertInfo(MGS(c, rs), ns, getVersionCollection(cl, ns, findPrimary(rs, ns))) .
+
+***Update
+    op UpdateCluster : QueryList Nat -> Msg [ctor] .
+    op UpdateMongos : QueryList Nat -> Msg [ctor] .
+    crl [updateMongos] : 
+    UpdateMongos(cq, n)
+    MGS(c, rs)
+    => MGS(c, (rs updateRS(cq')))
+    if cq' := createQueryUpdateCSRS(rs, cq, n) .
+    rl [UpdateCluster] : 
+    UpdateCluster(cq, n')
+    MDB(mongos, CL(n, (shm', n' |-> rs, shm)))
+    => (MDB(mongos, CL(n, (shm', n' |-> (rs updateRS(cq)), shm)))) .
+
+***DDL queries
+
+    op newDatabase : String -> Msg [ctor] .
+    op dropDatabase : String -> Msg [ctor] .
+    op createUnShardedCollection : String String -> Msg [ctor] .
+    op createShardedCollection : String String String -> Msg [ctor] . ***Database name, Collection name, key for sharding 
+    op dropCollection : String String -> Msg [ctor] .
+    op databaseCreated : -> Msg [ctor] .
+    op collectionCreated : -> Msg [ctor] .
+
+    rl [newDatabase] : 
+    newDatabase(s)
+    mdb
+    => (mdb Router(DDLQ(nullNS, createDatabase, s))) databaseCreated . 
+
+    rl [createUnShardedCollection] : 
+    createUnShardedCollection(s', s)
+    mdb
+    => (mdb Router(DDLQ(NS(s', ""), createUnShardedCollection, s))) collectionCreated .
+
+    rl [createShardedCollection] : 
+    createShardedCollection(s', s, k)
+    mdb
+    => (mdb Router(DDLQ(NS(s', s), createShardedCollection, k))) collectionCreated .
+
+***DML queries
+    ***Insert one
+    op insertOne : String String JSON -> Msg [ctor] .
+    op insertOne : NameSpace JSON -> Msg [ctor] .
+    op errInsertOne : -> Msg [ctor] .
+
+
+    rl [insertOne] : 
+    insertOne(dbn, coln, j)
+        MDB(mongos, cl)
+    => MDB(mongos, cl) Router(CQ(NS(dbn, coln), insertOne(j))) .
+
+
+    ***Find 
+    op find : String String JSON -> Msg [ctor] .
+    op routerFindQuery : CompleteQuery -> Msg [ctor] .
+    op refreshedCache : CompleteQuery -> Msg [ctor] .
+    op RouterBroadcast : CompleteQuery Set{Nat} Set{JSON} -> Msg [ctor] .
+    op Output : Set{JSON} -> Msg [ctor] .
+    op Output : String -> Msg [ctor] .
+
+    rl [find] : 
+    find(dbn, coln, j)
+    MDB(mongos, cl)
+    => MDB(mongos, cl) routerFindQuery(CQ(NS(dbn, coln), find(j))) .
+
+    ***Broadcasted find query
+    crl [routerFindQuery] :
+    routerFindQuery(cq)
+    MDB(MGS(c, rs), cl)
+    => MDB(MGS(c, rs), cl) RouterBroadcast(cq, (sn) , empty)
+    if isBroadcast(MGS(c, rs), cq) /\ sn := getAllShards(rs) .
+    ***Broadcast findQuery recursion .
+    crl [broadcastFindRecursion] : 
+    RouterBroadcast(cq, (n, sn), sj)
+    MDB(mongos, cl)
+    => MDB(mongos, cl) RouterBroadcast(cq, sn, (sj, sj'))
+    if sj' := find(cl, n, cq )  .
+    ***Broadcast findquery base case
+    rl [BroadcastFindBaseCase] : 
+    RouterBroadcast(cq, empty, sj)
+    MDB(mongos, cl)
+    => MDB(mongos, cl) Output(sj) .
+
+    ***Non broadcasted query:
+    ***We refresh the cache. By default, the updateCache operation doesnt do anything
+    crl [routerFindQuery] :
+    routerFindQuery(CQ(ns, find(J)))
+    MDB(m, cl)
+    => MDB(refreshedMongos, cl) refreshedCache(CQ(ns, find(J)))
+    if (not isBroadcast(m, CQ(ns, find(J)))) /\ refreshedMongos := updateCache(m, cl, CQ(ns, find(J))) .
+    
+    ***Routing info refreshed. Collection not found.
+    crl [routerFindQuery] :
+    refreshedCache(CQ(ns, find(J)))
+    MDB(m, cl)
+    => MDB(m, cl) Output("Collection not found")
+    if (not isBroadcast(m, CQ(ns, find(J)))) /\ ri := findShard(m, CQ(ns, find(J))) /\ (ri == notFoundRI) .
+
+    ***Routing info refreshed. Info not found.
+    crl [routerFindQuery] :
+    refreshedCache(CQ(ns, find(J)))
+    MDB(m, cl)
+    => MDB(m, cl) Output(empty)
+    if (not isBroadcast(m, CQ(ns, find(J)))) /\ ri := findShard(m, CQ(ns, find(J))) /\ (ri =/= notFoundRI) /\ n' := getRoutingShard(ri, J) /\ (n' == notFound) .
+
+    ***Routing info refreshed. Info found.
+    crl [routerFindQuery] :
+    refreshedCache(CQ(ns, find(J)))
+    MDB(m, cl)
+    => MDB(m, cl) Output(sj')
+    if (not isBroadcast(m, CQ(ns, find(J)))) /\ ri := findShard(m, CQ(ns, find(J))) /\ (ri =/= notFoundRI) /\ n' := getRoutingShard(ri, J) /\ (n' =/= notFound) /\ version := getVersion(ri)
+     /\ version' := getVersionCollection(cl, ns,  n') /\ (version == version') /\ sj' := find(cl, n', CQ(ns, find(J))) .
+
+endm
+
+
+
+rew newMongoDB .
+

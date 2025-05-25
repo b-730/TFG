@@ -1,0 +1,12 @@
+fmod DATABASE is
+    pr MAP{String, Collection} * (sort Map{String, Collection} to Database) .
+endfm
+
+
+view Database from TRIV to DATABASE is
+    sort Elt to Database .
+endv
+
+fmod DATABASEMAP is
+    pr MAP{String, Database} * (sort Map{String, Database} to DatabaseMap) .
+endfm

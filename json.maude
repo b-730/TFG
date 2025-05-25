@@ -1,0 +1,83 @@
+
+fmod JSON is
+    pr VALUE .
+    pr EXT-BOOL .
+    pr SET{Key} .
+
+    sorts JSON .
+    subsort JSON < Value .
+
+    vars MSV MSV' : Map{Key, Value} .
+    var  LV : List{Value} .
+    vars V V' : Value .
+    var  O : Operator .
+    var  S : String .
+    vars K K' : Key .
+
+    op getKeys : JSON ~> Set{Key} .
+    eq getKeys( v((K |-> V, MSV))) = K, getKeys(v(MSV)) .
+
+
+    eq getKeys(v((empty).Map{Key,Value})) = empty .
+    
+
+    cmb v(MSV) : JSON
+     if not repeated(MSV) .
+
+    op findOp : Map{Key, Value} -> Bool .
+    eq findOp((K |-> V, MSV)) = K :: Operator or-else findOp(V) or-else findOp(MSV) .
+    eq findOp(empty) = false .
+
+    op findOp : Value -> Bool .
+    eq findOp(v(MSV)) = findOp(MSV) .
+    eq findOp(v(LV)) = findOp*(LV) .
+    eq findOp(V) = false [owise] .
+
+    op findOp* : List{Value} -> Bool .
+    eq findOp*(V LV) = findOp(V) or-else findOp*(LV) .
+    eq findOp*(nil) = false .  
+
+    
+    op findRepeated : Map{Key, Value} -> Bool .
+    eq findRepeated(MSV) = repeated(MSV) or-else findRepeated*(MSV) .
+    eq findRepeated(empty) = false .
+
+    op findRepeated* : Map{Key, Value} -> Bool .
+    eq findRepeated*(empty) = false .
+    eq findRepeated*((K |-> V, MSV)) = findRepeated(V) .
+
+    op findRepeated : Value -> Bool .
+    eq findRepeated(v(MSV)) = findRepeated(MSV) .
+    eq findRepeated(V) = false [owise] .
+
+    op keysAreString : Map{Key, Value} -> Bool .
+    eq keysAreString((O |-> V, MSV)) = false .
+    eq keysAreString (MSV) = true [owise] .
+
+    op repeated : Map{Key, Value} -> Bool .
+    eq repeated((S |-> V, S |-> V', MSV)) = true .
+    eq repeated(MSV) = false [owise] .
+
+    op contains : JSON String -> Bool .
+    eq contains(v(((S |-> V), MSV)), S) = true .
+    eq contains(v(MSV), S) = false [owise] .
+
+    op _._ : JSON Key -> SearchResalt .
+    ceq v(MSV) . K = V 
+    if V := MSV [ K ] .
+
+
+
+    eq V . K = notFound [owise] .
+    
+
+
+    op add : JSON String Value ~> JSON .
+    eq add(v((S |-> V, MSV)), S, V') = v((S |-> V', MSV)) .
+    eq add(v(MSV), S, V) = v((S |-> V, MSV)) [owise] .
+endfm
+
+view JSON from TRIV to JSON is
+    sort Elt to JSON .
+endv
+

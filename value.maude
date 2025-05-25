@@ -1,0 +1,164 @@
+fmod KEY is
+
+    pr OPERATOR .
+    pr STRING .
+    sort Key .
+    subsort Operator String < Key .
+
+endfm
+
+fmod NAMESPACE is
+    pr STRING .
+
+    sort NameSpace .
+
+    op NS : String String -> NameSpace [ctor] .
+    op nullNS : -> NameSpace [ctor] .
+
+endfm
+
+view NameSpace from TRIV to NAMESPACE is
+    sort Elt to NameSpace .
+endv
+
+
+view Key from TRIV to KEY is
+    sort Elt to Key .
+endv
+
+fmod PROTO-QUERY is
+    sort Query .
+endfm
+
+
+fmod PROTO-VALUE is
+    sorts Value Value? SearchResalt .
+    subsort Value < SearchResalt Value? .
+    op notFound : -> SearchResalt [ctor] .
+endfm
+
+view Value from TRIV to PROTO-VALUE is
+    sort Elt to Value .
+endv
+
+
+fmod VALUE is
+    pr MAP{Key, Value} .
+    pr LIST{Value} .
+    pr STRING .
+    pr FLOAT .
+    pr DATE .
+    pr INT .
+    pr DDL .
+    pr NAMESPACE .
+    pr PROTO-QUERY .
+
+    ex PROTO-VALUE .
+
+    op null : -> Value [ctor] .
+
+    var b b' : Bool .
+    var i i' : Int .
+    var s s' : String .
+    var d d' : Date .
+    var f f' : Float .
+    var V V' : Value .
+    var  MKV : Map{Key, Value} .
+    var LV LV' : List{Value} .
+    var SR : SearchResalt .
+    var O : Operator .
+    var ddl : DDL .
+    var ns : NameSpace .
+    var Q : Query .
+
+
+    op v : Date -> Value [ctor] .
+    op v : String -> Value [ctor] .
+    op v : Bool -> Value [ctor] .
+    op v : Int -> Value [ctor] .
+    op v : Float -> Value [ctor] .
+    op v : List{Value} -> Value [ctor] .
+    op v : DDL -> Value [ctor] .
+    op v : NameSpace -> Value [ctor] .
+    op v : Map{Key, Value} -> Value? [ctor] .
+    op v : Query -> Value [ctor] .
+
+
+
+    op valid : Map{Key, Value} -> Bool .
+    ceq valid((s |-> V, s' |-> V', MKV)) = true
+    if s =/= s' .
+    eq valid(MKV) = false [owise] .
+
+    cmb v(MKV) : Value
+        if valid(MKV) .
+
+    op _=_ : Value Value ~> Bool .
+    eq V = V = true .
+    eq V = V' = false [owise]. 
+
+
+    op _!=_ : Value Value ~> Bool .
+    eq V != V' = not(V = V').        
+
+    op _<_ : Value Value ~> Bool .
+    eq  v(i) < v(i') = i < i' .
+    eq  v(s) < v(s') = s < s' .
+    eq  v(d) < v(d') = d < d' .
+    eq  v(f) < v(f') = f < f' .
+
+
+    op _>_ : Value Value ~> Bool .
+
+    eq  v(i) > v(i') = i > i' .
+    eq  v(s) > v(s') = s > s' .
+    eq  v(d) > v(d') = d > d' .
+    eq  v(f) > v(f') = f > f' .
+
+    op _>=_ : Value Value ~> Bool .
+    eq  V >= V' = (V > V') or (V = V') .
+
+    op _<=_ : Value Value ~> Bool .
+    eq V <= V' = (V < V') or (V = V') . 
+
+
+    op ___ : SearchResalt Operator Value ~> Bool .
+    eq V $eq V' = V = V' .
+    eq V $ne V' = V != V' .
+    eq V $gt V' = V > V' .
+    eq V $gte V' = V >= V' .
+    eq V $lt V' = V < V' .
+    eq V $lte V' = V <= V' .
+    eq V $exists v(b) = b .
+    eq notFound $exists v(b) = not b .
+    
+    eq notFound $eq V = false .
+    eq notFound $gt V = false .
+    eq notFound $gte V = false .
+    eq notFound $lt V = false .
+    eq notFound $lte V = false .
+    eq notFound $ne V = false .
+
+    eq V $in v(LV V LV') = true .
+    eq V $in V' = false [owise] .
+
+    op getMap : Value ~> Map{Key, Value} .
+    eq getMap(v(MKV)) = MKV .
+    op getNat : Value ~> Nat .
+    eq getNat(v(i)) = i .
+    op getString : Value ~> String .
+    eq getString(v(s)) = s .
+    op getFloat : Value ~> Float .
+    eq getFloat(v(f)) = f .
+    ***op getDate : Value ~> Date .
+    ***eq getDate(v(d)) = d .
+    op getBool : Value ~> Bool .
+    eq getBool(v(b)) = b .
+    op getDDL : Value ~> DDL .
+    eq getDDL(v(ddl)) = ddl .
+    op getNameSpace : Value ~> NameSpace .
+    eq getNameSpace(v(ns)) = ns .
+    op getQuery : Value ~> Query .
+    eq getQuery(v(Q)) = Q .
+
+endfm

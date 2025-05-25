@@ -1,0 +1,49 @@
+fmod COLLECTION is
+    pr MAP{Nat, JSON} .
+    sort UnshardedCollection ShardedCollection Collection .
+    subsorts UnshardedCollection ShardedCollection < Collection .
+
+    var SJ : Map{Nat, JSON} .
+    var N : Nat .
+    var J : JSON .
+    var mnj : Map{Nat, JSON} .
+    var n n' : Nat .
+
+
+    op UC : Map{Nat, JSON} Nat Nat -> UnshardedCollection [ctor] . ***nat1 = objectID counter, nat2 = version
+    op SC : Map{Nat, JSON} Nat -> ShardedCollection [ctor] . ***en los sharded, el metadata se almacena en el config server
+
+    op emptyUC : -> UnshardedCollection .
+    eq emptyUC = UC(empty, 0, 1) .
+    op emptySC : -> ShardedCollection .
+    eq emptySC = SC(empty, 1) .
+
+
+    op size : Collection -> Nat .
+    eq size(UC(mnj, n, n')) = sizeMap(mnj) .
+    eq size(SC(mnj, n)) = sizeMap(mnj) .
+
+        
+    op sizeMap : Map{Nat, JSON}  -> Nat .
+    eq sizeMap(((n |-> J), mnj)) = s(sizeMap(mnj)) .
+    eq sizeMap(empty) = 0 .
+
+    op getVersionCol : Collection -> Nat .
+    eq getVersionCol(UC(mnj, n, n')) = n' .
+    eq getVersionCol(SC(mnj, n)) = n .
+
+    op increaseVersion : Collection -> Collection .
+    eq increaseVersion(UC(mnj, n, n')) = UC(mnj, n, s(n')) .
+    eq increaseVersion(SC(mnj, n)) = SC(mnj, s(n)) .
+
+
+
+
+
+endfm
+
+view Collection from TRIV to COLLECTION is
+    sort Elt to Collection .
+endv
+
+
